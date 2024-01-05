@@ -78,8 +78,17 @@ int main(void)
   /* USER CODE BEGIN 1 */
 	  uint8_t buff[50];
 	  VL53L1_RangingMeasurementData_t RangingData;
-	  VL53L1_Dev_t  vl53l1_c; // center module
-	  VL53L1_DEV    Dev = &vl53l1_c;
+	  VL53L1_Dev_t  vl53l1_l; // center module
+	  VL53L1_Dev_t  vl53l1_r;
+	  VL53L1_DEV    Dev = &vl53l1_l;
+
+	  uint8_t ToFSensor = 0; // left = 0, right = 1;
+	  uint8_t newI2C = 0x52;
+
+	  uint8_t result;
+	  uint8_t rangeLeft;
+	  uint8_t rangeRight;
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -104,26 +113,47 @@ int main(void)
   MX_CAN_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-  Dev->I2cHandle = &hi2c1;
-  Dev->I2cDevAddr = 0x52;
-
-  	HAL_GPIO_WritePin(XShut1_GPIO_Port, XShut1_Pin, GPIO_PIN_RESET);
-    HAL_Delay(2); // 2ms reset time
-    HAL_GPIO_WritePin(XShut1_GPIO_Port, XShut1_Pin, GPIO_PIN_SET);
-    HAL_Delay(2);
 
 
+  for (ToFSensor=0;ToFSensor<2;ToFSensor++){
+  		switch(ToFSensor){
+  			case 0:
+  				HAL_GPIO_WritePin(XShut0_GPIO_Port, XShut0_Pin, GPIO_PIN_RESET);
+  				HAL_Delay(2); // 2ms reset time
+  				HAL_GPIO_WritePin(XShut0_GPIO_Port, XShut0_Pin, GPIO_PIN_SET);
+  	    	  	HAL_Delay(2);
+  				Dev=&vl53l1_l;
+  				break;
+  			case 1:
+  				HAL_GPIO_WritePin(XShut1_GPIO_Port, XShut1_Pin, GPIO_PIN_RESET);
+  				HAL_Delay(2); // 2ms reset time
+  				HAL_GPIO_WritePin(XShut1_GPIO_Port, XShut1_Pin, GPIO_PIN_SET);
+  				HAL_Delay(2);
+  				Dev=&vl53l1_r;
+  				break;
+  }
+
+	  Dev->I2cHandle = &hi2c1;
+	  Dev->I2cDevAddr = 0x52;
+	  Dev->comms_type = 1;
+	  newI2C = Dev->I2cDevAddr + (ToFSensor+1)*2;
+	  VL53L1_SetDeviceAddress(Dev, newI2C);
+	  Dev->I2cDevAddr=newI2C;
+      HAL_Delay(2);
     /*** VL53L1X Initialization ***/
-    VL53L1_WaitDeviceBooted( Dev );
-    VL53L1_DataInit( Dev );
-    VL53L1_StaticInit( Dev );
-    VL53L1_SetDistanceMode( Dev, VL53L1_DISTANCEMODE_LONG );
-    VL53L1_SetMeasurementTimingBudgetMicroSeconds( Dev, 50000 );
-    VL53L1_SetInterMeasurementPeriodMilliSeconds( Dev, 500 );
-    VL53L1_StartMeasurement( Dev );
-
+      VL53L1_WaitDeviceBooted( Dev );
+      VL53L1_DataInit( Dev );
+      VL53L1_StaticInit( Dev );
+      VL53L1_SetDistanceMode( Dev, VL53L1_DISTANCEMODE_LONG );
+      VL53L1_SetMeasurementTimingBudgetMicroSeconds( Dev, 50000 );
+      VL53L1_SetInterMeasurementPeriodMilliSeconds( Dev, 500 );
+      VL53L1_StartMeasurement( Dev );
+  }
     HAL_CAN_Start(&hcan);
     TxHeader.DLC = 8;
+
+
+
 
   /* USER CODE END 2 */
 
@@ -134,15 +164,35 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  VL53L1_WaitMeasurementDataReady( Dev );
+	  for (ToFSensor=0;ToFSensor<2;ToFSensor++){
+		  switch(ToFSensor){
+		    	case 0:
+		    		Dev=&vl53l1_l;
+		    		VL53L1_StartMeasurement(Dev);
+		    		VL53L1_WaitMeasurementDataReady( Dev );
+		    		VL53L1_GetRangingMeasurementData( Dev, &RangingData );
+		    		rangeLeft = RangingData.RangeMilliMeter;
+		    		//	  	HAL_CAN_AddTxMessage(&hcan, &TxHeader, buff, &MailBox);
+		    	    HAL_Delay(1000);
+		    	    VL53L1_ClearInterruptAndStartMeasurement( Dev );
+		    		break;
+		    	case 1:
 
-	  	VL53L1_GetRangingMeasurementData( Dev, &RangingData );
+		    		Dev=&vl53l1_r;
+		    		VL53L1_StartMeasurement(Dev);
+		    		VL53L1_WaitMeasurementDataReady( Dev );
+		    		VL53L1_GetRangingMeasurementData( Dev, &RangingData );
+		    		rangeRight = RangingData.RangeMilliMeter;
+		    		//	  	HAL_CAN_AddTxMessage(&hcan, &TxHeader, buff, &MailBox);
+		    		HAL_Delay(1000);
+		    		VL53L1_ClearInterruptAndStartMeasurement( Dev );
+		    		break;
+	  	}
+	  }
+		memset(buff,0,sizeof(buff)); //clear buffer
+		sprintf( (char*)buff, "L%dR%d ",rangeLeft,rangeRight );
+		HAL_UART_Transmit(&huart1, buff, strlen((char*)buff ), 500);
 
-	  	sprintf( (char*)buff, "%u,%d,", RangingData.RangeStatus, RangingData.RangeMilliMeter);
-	  	HAL_UART_Transmit(&huart1, buff, strlen((char*)buff ), 500);
-	  	HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &MailBox);
-	  	HAL_Delay(1000);
-	  	VL53L1_ClearInterruptAndStartMeasurement( Dev );
   }
   /* USER CODE END 3 */
 }
